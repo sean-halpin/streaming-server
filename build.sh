@@ -1,2 +1,3 @@
-gcc server.c -o server `pkg-config --cflags --libs gstreamer-1.0`
+mkdir -p ./bin
+gcc ./src/server.c -o ./bin/server `pkg-config --cflags --libs gstreamer-1.0`
 
