@@ -48,6 +48,71 @@ struct hostent {
 }
 #endif
 
+struct PipelineSession
+{
+    /**
+   * The GstLaunch syntax used to create the pipeline
+   */
+    gchar *description;
+    /**
+   * The GstLaunch syntax used to create the pipeline
+   */
+    gchar *id;
+    /**
+   * A Gstreamer element holding the pipeline
+   */
+    GstElement *pipeline;
+};
+
+void createPipeline(int argc, char **argv, GstElement *pipeline, char *array[])
+{
+    // GstElement *pipeline;
+    GstBus *bus;
+    GstMessage *msg;
+
+    gst_println("RTP Session Started");
+    /* Print Args */
+    gst_println("pattern: %s", array[1]);
+    gst_println("remote host: %s", array[2]);
+    gst_println("client rtp port: %s", array[3]);
+    gst_println("client rtcp port: %s", array[4]);
+    gst_println("server rtcp port: %s", array[5]);
+
+    if (strcmp(array[0], "play") == 0)
+    {
+
+        /* Initialize GStreamer */
+        gst_init(&argc, &argv);
+
+        /* Build Pipeline String */
+        gchar buffer[1024];
+        g_snprintf(buffer, sizeof(buffer),
+                   "rtpbin name=rtpbin autoremove=true "
+                   "videotestsrc pattern=%s ! videoconvert ! x264enc ! rtph264pay ! rtpbin.send_rtp_sink_0 "
+                   "rtpbin.send_rtp_src_0 ! udpsink name=rtpudpsink host=%s port=%s "
+                   "rtpbin.send_rtcp_src_0 ! udpsink name=rtcpudpsink  host=%s port=%s sync=false async=false "
+                   "udpsrc name=rtcpudpsrc port=%s ! rtpbin.recv_rtcp_sink_0",
+                   array[1], array[2], array[3], array[2], array[4], array[5]);
+        gst_println(buffer);
+        /* Build the pipeline */
+        pipeline = gst_parse_launch(buffer, NULL);
+
+        /* Start playing */
+        gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+        /* Wait until error or EOS */
+        bus = gst_element_get_bus(pipeline);
+        msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
+
+        /* Free resources */
+        if (msg != NULL)
+            gst_message_unref(msg);
+        gst_object_unref(bus);
+        gst_element_set_state(pipeline, GST_STATE_NULL);
+        gst_object_unref(pipeline);
+    }
+}
+
 /*
  * error - wrapper for perror
  */
@@ -59,6 +124,8 @@ void error(char *msg)
 
 int main(int argc, char **argv)
 {
+    int pipelineCount = 0;
+    struct PipelineSession pipelines[1024];
     int parentfd;                  /* parent socket */
     int childfd;                   /* child socket */
     int portno;                    /* port to listen on */
@@ -80,14 +147,12 @@ int main(int argc, char **argv)
         exit(1);
     }
     portno = atoi(argv[1]);
-
     /* 
    * socket: create the parent socket 
    */
     parentfd = socket(AF_INET, SOCK_STREAM, 0);
     if (parentfd < 0)
         error("ERROR opening socket");
-
     /* setsockopt: Handy debugging trick that lets 
    * us rerun the server immediately after we kill it; 
    * otherwise we have to wait about 20 secs. 
@@ -96,34 +161,27 @@ int main(int argc, char **argv)
     optval = 1;
     setsockopt(parentfd, SOL_SOCKET, SO_REUSEADDR,
                (const void *)&optval, sizeof(int));
-
     /*
    * build the server's Internet address
    */
     bzero((char *)&serveraddr, sizeof(serveraddr));
-
     /* this is an Internet address */
     serveraddr.sin_family = AF_INET;
-
     /* let the system figure out our IP address */
     serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
     /* this is the port we will listen on */
     serveraddr.sin_port = htons((unsigned short)portno);
-
     /* 
    * bind: associate the parent socket with a port 
    */
     if (bind(parentfd, (struct sockaddr *)&serveraddr,
              sizeof(serveraddr)) < 0)
         error("ERROR on binding");
-
     /* 
    * listen: make this socket ready to accept connection requests 
    */
     if (listen(parentfd, 5) < 0) /* allow 5 requests to queue up */
         error("ERROR on listen");
-
     /* 
    * main loop: wait for a connection request, echo input line, 
    * then close connection.
@@ -131,14 +189,12 @@ int main(int argc, char **argv)
     clientlen = sizeof(clientaddr);
     while (1)
     {
-
         /* 
      * accept: wait for a connection request 
      */
         childfd = accept(parentfd, (struct sockaddr *)&clientaddr, &clientlen);
         if (childfd < 0)
             error("ERROR on accept");
-
         /* 
      * gethostbyaddr: determine who sent the message 
      */
@@ -151,7 +207,6 @@ int main(int argc, char **argv)
             error("ERROR on inet_ntoa\n");
         printf("server established connection with %s (%s)\n",
                hostp->h_name, hostaddrp);
-
         /* 
      * read: read input string from the client
      */
@@ -164,7 +219,6 @@ int main(int argc, char **argv)
         int i = 0;
         char *p = strtok(buf, " ");
         char *array[10];
-
         while (p != NULL)
         {
             array[i++] = p;
@@ -175,50 +229,10 @@ int main(int argc, char **argv)
      * Start GStreamer Pipeline
      */
         GstElement *pipeline;
-        GstBus *bus;
-        GstMessage *msg;
-
-        gst_println("RTP Session Started");
-        /* Print Args */
-        gst_println("pattern: %s", array[1]);
-        gst_println("remote host: %s", array[2]);
-        gst_println("client rtp port: %s", array[3]);
-        gst_println("client rtcp port: %s", array[4]);
-        gst_println("server rtcp port: %s", array[5]);
-
-        if (strcmp(array[0], "play") == 0)
-        {
-
-            /* Initialize GStreamer */
-            gst_init(&argc, &argv);
-
-            /* Build Pipeline String */
-            gchar buffer[1024];
-            g_snprintf(buffer, sizeof(buffer),
-                       "rtpbin name=rtpbin autoremove=true "
-                       "videotestsrc pattern=%s ! videoconvert ! x264enc ! rtph264pay ! rtpbin.send_rtp_sink_0 "
-                       "rtpbin.send_rtp_src_0 ! udpsink name=rtpudpsink host=%s port=%s "
-                       "rtpbin.send_rtcp_src_0 ! udpsink name=rtcpudpsink  host=%s port=%s sync=false async=false "
-                       "udpsrc name=rtcpudpsrc port=%s ! rtpbin.recv_rtcp_sink_0",
-                       array[1], array[2], array[3], array[2], array[4], array[5]);
-            gst_println(buffer);
-            /* Build the pipeline */
-            pipeline = gst_parse_launch(buffer, NULL);
-
-            /* Start playing */
-            gst_element_set_state(pipeline, GST_STATE_PLAYING);
-
-            /* Wait until error or EOS */
-            bus = gst_element_get_bus(pipeline);
-            msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
-
-            /* Free resources */
-            if (msg != NULL)
-                gst_message_unref(msg);
-            gst_object_unref(bus);
-            gst_element_set_state(pipeline, GST_STATE_NULL);
-            gst_object_unref(pipeline);
-        }
+        pipelineCount += 1;
+        struct PipelineSession sess = {"", "", pipeline};
+        pipelines[pipelineCount] = sess;
+        createPipeline(argc, argv, pipeline, array);
 
         /* 
      * write: echo the input string back to the client 
