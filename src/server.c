@@ -1,6 +1,5 @@
 /* 
- * tcpserver.c - A simple TCP echo server 
- * usage: tcpserver <port>
+ * usage: server <port>
  */
 
 #include <stdio.h>
@@ -16,57 +15,15 @@
 
 #define BUFSIZE 1024
 
-#if 0
-/* 
- * Structs exported from in.h
- */
-
-/* Internet address */
-struct in_addr {
-  unsigned int s_addr; 
-};
-
-/* Internet style socket address */
-struct sockaddr_in  {
-  unsigned short int sin_family; /* Address family */
-  unsigned short int sin_port;   /* Port number */
-  struct in_addr sin_addr;	 /* IP address */
-  unsigned char sin_zero[...];   /* Pad to size of 'struct sockaddr' */
-};
-
-/*
- * Struct exported from netdb.h
- */
-
-/* Domain name service (DNS) host entry */
-struct hostent {
-  char    *h_name;        /* official name of host */
-  char    **h_aliases;    /* alias list */
-  int     h_addrtype;     /* host address type */
-  int     h_length;       /* length of address */
-  char    **h_addr_list;  /* list of addresses */
-}
-#endif
-
 struct PipelineSession
 {
-    /**
-   * The GstLaunch syntax used to create the pipeline
-   */
     gchar *description;
-    /**
-   * The GstLaunch syntax used to create the pipeline
-   */
     gchar *id;
-    /**
-   * A Gstreamer element holding the pipeline
-   */
     GstElement *pipeline;
 };
 
 void createPipeline(int argc, char **argv, GstElement *pipeline, char *array[])
 {
-    // GstElement *pipeline;
     GstBus *bus;
     GstMessage *msg;
 
@@ -94,28 +51,15 @@ void createPipeline(int argc, char **argv, GstElement *pipeline, char *array[])
                    "udpsrc name=rtcpudpsrc port=%s ! rtpbin.recv_rtcp_sink_0",
                    array[1], array[2], array[3], array[2], array[4], array[5]);
         gst_println(buffer);
+        gst_println("\n");
         /* Build the pipeline */
         pipeline = gst_parse_launch(buffer, NULL);
 
         /* Start playing */
         gst_element_set_state(pipeline, GST_STATE_PLAYING);
-
-        /* Wait until error or EOS */
-        bus = gst_element_get_bus(pipeline);
-        msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
-
-        /* Free resources */
-        if (msg != NULL)
-            gst_message_unref(msg);
-        gst_object_unref(bus);
-        gst_element_set_state(pipeline, GST_STATE_NULL);
-        gst_object_unref(pipeline);
     }
 }
 
-/*
- * error - wrapper for perror
- */
 void error(char *msg)
 {
     perror(msg);
