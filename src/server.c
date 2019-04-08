@@ -16,6 +16,9 @@
 #include <gst/gst.h>
 
 #define BUFSIZE 1024
+#define true 1
+#define false 0
+typedef int bool;
 
 typedef struct PipelineSession
 {
@@ -23,6 +26,27 @@ typedef struct PipelineSession
     gchar id[BUFSIZE];
     GstElement *pipeline;
 } PipelineSession;
+
+void error(char *msg)
+{
+    perror(msg);
+    exit(1);
+}
+
+void playPipeline(GstElement *pipeline)
+{
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+}
+
+void pausePipeline(GstElement *pipeline)
+{
+    gst_element_set_state(pipeline, GST_STATE_PAUSED);
+}
+
+void stopPipeline(GstElement *pipeline)
+{
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+}
 
 GstElement *createPipeline(int argc, char **argv, char *array[])
 {
@@ -42,7 +66,7 @@ GstElement *createPipeline(int argc, char **argv, char *array[])
     gst_init(&argc, &argv);
 
     /* Build Pipeline String */
-    gchar buffer[1024];
+    gchar buffer[BUFSIZE];
     g_snprintf(buffer, sizeof(buffer),
                "rtpbin name=rtpman autoremove=true "
                "videotestsrc pattern=%s ! videoconvert ! x264enc ! rtph264pay ! rtpman.send_rtp_sink_0 "
@@ -54,16 +78,8 @@ GstElement *createPipeline(int argc, char **argv, char *array[])
     gst_println("\n");
     /* Build the pipeline */
     pipeline = gst_parse_launch(buffer, NULL);
-    /* Start playing */
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
     return pipeline;
-}
-
-void error(char *msg)
-{
-    perror(msg);
-    exit(1);
 }
 
 int main(int argc, char **argv)
@@ -124,7 +140,7 @@ int main(int argc, char **argv)
         error("ERROR on listen");
     /* main loop: wait for a connection request, echo input line, then close connection. */
     clientlen = sizeof(clientaddr);
-    while (1)
+    while (true)
     {
         //  accept: wait for a connection request
         childfd = accept(parentfd, (struct sockaddr *)&clientaddr, &clientlen);
@@ -154,46 +170,78 @@ int main(int argc, char **argv)
         {
             array[i++] = p;
             p = strtok(NULL, " ");
+            int ii = 0;
             if (p != NULL)
-                for (size_t i = 0; i < sizeof(p); i += sizeof(char))
+            {
+                do
                 {
-                    if (p[i] == '\n')
-                        p[i] = '\0';
-                }
+                    if (p[ii] == '\n')
+                        p[ii] = '\0';
+                } while (p[ii++] != '\0');
+            }
         }
         //  Start GStreamer Pipeline & store pipeline session info in array
         GstElement *pipeline = NULL;
         if (strcmp(array[0], "play") == 0)
         {
-            pipeline = createPipeline(argc, argv, array);
-            struct PipelineSession sess = {"", "", NULL};
-            gchar sessionDesc[BUFSIZE] = "rtp session";
-            strncpy(sess.description, sessionDesc, sizeof(sessionDesc));
-            strncpy(sess.id, array[1], sizeof(array[1]));
-            sess.pipeline = pipeline;
-            pipelines[pipelineCount++] = sess;
+            bool pipelineExists = false;
+            struct PipelineSession sess = {0, 0, 0};
+            for (int i = 0; i < pipelineCount; i++)
+            {
+                if (pipelines[i].id != 0 && strcmp(pipelines[i].id, array[1]) == 0)
+                {
+                    pipelineExists = true;
+                    sess = pipelines[i];
+                    printf("playing rtp server %s\n", array[1]);
+                    playPipeline(pipelines[i].pipeline);
+                }
+            }
+            if (pipelineExists == false)
+            {
+                pipeline = createPipeline(argc, argv, array);
+                printf("playing rtp server %s\n", array[1]);
+                playPipeline(pipeline);
+
+                gchar sessionDesc[BUFSIZE] = "rtp session";
+                strncpy(sess.description, sessionDesc, sizeof(sessionDesc));
+                strncpy(sess.id, array[1], BUFSIZE);
+                sess.pipeline = pipeline;
+                pipelines[pipelineCount++] = sess;
+            }
+        }
+        else if (strcmp(array[0], "pause") == 0)
+        {
+            for (int i = 0; i < pipelineCount; i++)
+            {
+                if (pipelines[i].id != 0 && strcmp(pipelines[i].id, array[1]) == 0)
+                {
+                    printf("pausing rtp server %s\n", array[1]);
+                    pipeline = pipelines[i].pipeline;
+                    GstElement *rtpman = gst_bin_get_by_name(GST_BIN(pipeline), "rtpman");
+                    pausePipeline(pipeline);
+                }
+            }
         }
         else if (strcmp(array[0], "stop") == 0)
         {
             for (int i = 0; i < pipelineCount; i++)
             {
-                if (pipelines[i].id != 0)
-                    if (strcmp(pipelines[i].id, array[1]) == 0)
-                    {
-                        printf("stopping rtp server %s", array[1]);
-                        GstElement *pip = pipelines[i].pipeline;
-                        GstElement *rtpman = gst_bin_get_by_name(GST_BIN(pip), "rtpman");
-                        GstEvent *eosEvent = gst_event_new_eos();
-
-                        gst_element_send_event(GST_ELEMENT(rtpman), eosEvent);
-                    }
+                if (pipelines[i].id != 0 && strcmp(pipelines[i].id, array[1]) == 0)
+                {
+                    printf("stopping rtp server %s\n", array[1]);
+                    pipeline = pipelines[i].pipeline;
+                    GstElement *rtpman = gst_bin_get_by_name(GST_BIN(pipeline), "rtpman");
+                    GstEvent *eosEvent = gst_event_new_eos();
+                    gst_element_send_event(GST_ELEMENT(rtpman), eosEvent);
+                    stopPipeline(pipeline);
+                }
             }
         }
+        printf("write tcp response\n");
         // write: echo the input string back to the client
-        n = write(childfd, buf, strlen(buf));
+        n = write(childfd, "", strlen(""));
         if (n < 0)
             error("ERROR writing to socket");
-
         close(childfd);
     }
 }
